@@ -25,6 +25,8 @@ if df.empty or 'Close' not in df.columns:
 
 # 🧾 Reset index and guarantee 'Datetime' column
 df = df.reset_index()
+
+# Make sure a valid 'Datetime' column exists
 if 'Datetime' not in df.columns:
     if 'index' in df.columns:
         df.rename(columns={'index': 'Datetime'}, inplace=True)
@@ -32,13 +34,13 @@ if 'Datetime' not in df.columns:
         df.rename(columns={'Date': 'Datetime'}, inplace=True)
     elif 'datetime' in df.columns:
         df.rename(columns={'datetime': 'Datetime'}, inplace=True)
+    else:
+        df['Datetime'] = pd.to_datetime(df.index)
 
-if 'Datetime' not in df.columns:
-    df.insert(0, 'Datetime', pd.to_datetime(df.index))
-
+df['Datetime'] = pd.to_datetime(df['Datetime'])
 df.dropna(inplace=True)
 
-# ✅ Create 1D Close series
+# ✅ Ensure 1D Close series
 try:
     close_series = pd.Series(df['Close'].values.flatten(), index=df.index)
 except Exception as e:
@@ -56,7 +58,7 @@ except Exception as e:
     st.error(f"Indicator calculation error: {e}")
     st.stop()
 
-# 🎯 Create target
+# 🎯 Create prediction target
 df['Target'] = close_series.shift(-3)
 df.dropna(inplace=True)
 
@@ -68,7 +70,7 @@ model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# 🔮 Make prediction
+# 🔮 Make live prediction
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
@@ -86,9 +88,14 @@ st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="indicator_selector")
 
-if selected and 'Datetime' in df.columns:
+# 🔐 Re-create 'Datetime' if it was dropped during transformations
+if 'Datetime' not in df.columns or not pd.api.types.is_datetime64_any_dtype(df['Datetime']):
+    df['Datetime'] = pd.to_datetime(df.index)
+
+# ✅ Plot if valid selection
+if selected:
     existing = [col for col in selected if col in df.columns]
-    if existing:
+    if existing and 'Datetime' in df.columns:
         try:
             melted = df[['Datetime'] + existing].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
 
@@ -108,6 +115,6 @@ if selected and 'Datetime' in df.columns:
         except Exception as e:
             st.error(f"Chart generation failed: {e}")
     else:
-        st.warning("Selected indicators are not in the data.")
+        st.warning("Selected indicators are missing from the data.")
 else:
-    st.warning("Select at least one indicator to generate the chart.")
+    st.warning("Select at least one indicator to display the chart.")
