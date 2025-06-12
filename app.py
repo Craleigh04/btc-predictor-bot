@@ -9,35 +9,39 @@ from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
 from streamlit_autorefresh import st_autorefresh
 
-# 🔄 Auto-refresh every 60 seconds
+# Auto-refresh every 60 seconds
 st_autorefresh(interval=60 * 1000, key="refresh")
 
-st.title("🚀 Bitcoin Momentum Analyzer Bot (BTC/USD)")
-st.caption("Live prediction bot using real-time indicators and Random Forest")
+st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
+st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
-# 📥 Load BTC/USD data
+# Download BTC/USD data
 df = yf.download("BTC-USD", period="1d", interval="1m")
 
-# Validate download
-if df.empty or 'Close' not in df.columns:
-    st.error("Failed to load BTC data. Try again later.")
+# Flatten MultiIndex columns (e.g., from ('Close', 'BTC-USD') to 'Close_BTC-USD')
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = ['_'.join(col).strip() for col in df.columns.values]
+
+# Verify required columns
+if df.empty or 'Close_BTC-USD' not in df.columns:
+    st.error("Unable to retrieve BTC price data.")
     st.stop()
 
-# 🧾 Normalize and guarantee 'Datetime'
+# Reset index and standardize 'Datetime'
 df = df.reset_index()
 df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
 if 'Datetime' not in df.columns:
     df['Datetime'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='min')
 df['Datetime'] = pd.to_datetime(df['Datetime'])
 
-# ✅ Create 1D Close series
+# Prepare Close series
 try:
-    close_series = pd.Series(df['Close'].values.flatten(), index=df.index)
+    close_series = pd.Series(df['Close_BTC-USD'].values.flatten(), index=df.index)
 except Exception as e:
-    st.error(f"Failed to prepare Close series: {e}")
+    st.error(f"Error preparing price series: {e}")
     st.stop()
 
-# 🧮 Add indicators
+# Compute indicators
 try:
     df['RSI'] = RSIIndicator(close=close_series).rsi()
     df['EMA'] = EMAIndicator(close=close_series, window=14).ema_indicator()
@@ -45,54 +49,53 @@ try:
     df['ROC'] = ROCIndicator(close=close_series).roc()
     df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
 except Exception as e:
-    st.error(f"Indicator error: {e}")
+    st.error(f"Indicator calculation error: {e}")
     st.stop()
 
-# 🎯 Prediction target
+# Target variable
 df['Target'] = close_series.shift(-3)
-
-# 🔁 Drop NaNs and reset index
 df = df.dropna().reset_index(drop=True)
 
-# ✅ Re-attach 'Datetime' after dropna
+# Restore Datetime column if dropped
 if 'Datetime' not in df.columns or df['Datetime'].isnull().any():
     df['Datetime'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='min')
 df['Datetime'] = pd.to_datetime(df['Datetime'])
 
-# 🤖 Train Random Forest model
-features = ['Close', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
+# Train model
+features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
 y = df['Target']
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# 🔮 Make live prediction
+# Live forecast
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 price_diff = future_price - actual_price
 
-# 📊 Display prediction
-st.subheader("📊 Live Prediction")
+# Display results
+st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
-col1.metric("Actual", f"${actual_price:,.2f}")
-col2.metric("Predicted (3min)", f"${future_price:,.2f}")
+col1.metric("Actual Price", f"${actual_price:,.2f}")
+col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
-# 📈 BTC Chart (Toggle Indicators)
-st.subheader("📈 BTC Chart (Toggle Indicators)")
-options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="chart_selector")
+# Chart toggles
+st.subheader("Indicator Trend Visualization")
+options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
+selected = st.multiselect("Select indicators to display:", options, default=['Close_BTC-USD', 'EMA', 'Predicted'], key="chart_selector")
 
-# 💡 Guarantee 'Datetime' column before plotting
+# Recheck Datetime before plotting
 if 'Datetime' not in df.columns or not pd.api.types.is_datetime64_any_dtype(df['Datetime']):
     df['Datetime'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='min')
+df['Datetime'] = pd.to_datetime(df['Datetime'])
 
-# 📉 Build chart
+# Plot chart
 if selected:
     existing = [col for col in selected if col in df.columns]
-    if existing and 'Datetime' in df.columns:
+    if existing:
         try:
             melted = df[['Datetime'] + existing].copy().melt(id_vars='Datetime', var_name='Metric', value_name='Value')
 
@@ -103,7 +106,7 @@ if selected:
                 y='Value:Q',
                 color='Metric:N',
                 tooltip=['Datetime:T', 'Metric:N', 'Value:Q'],
-                opacity=alt.condition(highlight, alt.value(1), alt.value(0.1))
+                opacity=alt.condition(highlight, alt.value(1), alt.value(0.15))
             ).add_selection(
                 highlight
             ).interactive()
@@ -111,9 +114,9 @@ if selected:
             st.altair_chart(chart, use_container_width=True)
         except Exception as e:
             st.error(f"Chart generation failed: {e}")
-            st.write("📛 DEBUG: DataFrame HEAD", df.head())
-            st.write("📛 DEBUG: Columns", df.columns.tolist())
+            st.write("Debug: DataFrame Columns", df.columns.tolist())
+            st.write("Debug: DataFrame Sample", df.head())
     else:
-        st.warning("One or more selected indicators are not available in the data.")
+        st.warning("Selected columns are not available in the current dataset.")
 else:
-    st.warning("Please select at least one indicator to display the chart.")
+    st.warning("Please select at least one indicator to display the graph.")
