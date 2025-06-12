@@ -65,7 +65,8 @@ col3.metric("Difference", f"{price_diff:+.2f}")
 
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
+selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="indicator_selector")
+
 
 # Confirm all selected columns exist in df
 existing = [col for col in selected if col in df.columns]
