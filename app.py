@@ -69,7 +69,27 @@ options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
 
 if selected:
-    melted = df[['Datetime'] + selected].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
+    # Filter to existing columns only
+existing = [col for col in selected if col in df.columns]
+
+if existing:
+    melted = df[['Datetime'] + existing].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
+
+    highlight = alt.selection_multi(fields=['Metric'], bind='legend')
+
+    chart = alt.Chart(melted).mark_line().encode(
+        x='Datetime:T',
+        y='Value:Q',
+        color='Metric:N',
+        tooltip=['Datetime:T', 'Metric:N', 'Value:Q'],
+        opacity=alt.condition(highlight, alt.value(1), alt.value(0.1))
+    ).add_selection(
+        highlight
+    ).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
+else:
+    st.warning("None of the selected indicators are available yet.")
     
     highlight = alt.selection_multi(fields=['Metric'], bind='legend')
 
