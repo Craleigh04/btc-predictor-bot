@@ -63,12 +63,11 @@ col1.metric("Actual", f"${actual_price:,.2f}")
 col2.metric("Predicted (3min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
-# 📉 Chart section
+# ✅ NOW move the chart section HERE (after Predicted exists)
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
 
-# 📈 Build chart with Altair
 if selected:
     melted = df[['Datetime'] + selected].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
     
@@ -87,5 +86,3 @@ if selected:
     st.altair_chart(chart, use_container_width=True)
 else:
     st.warning("Select at least one indicator to view the chart.")
-
-st.caption("⚠️ Educational use only. Auto-refreshes every minute.")
