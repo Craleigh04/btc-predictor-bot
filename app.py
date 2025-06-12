@@ -1,68 +1,95 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import ta
-from sklearn.ensemble import RandomForestRegressor
 import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from ta.momentum import RSIIndicator, ROCIndicator
+from ta.trend import EMAIndicator, MACD
+from ta.volatility import BollingerBands
 from streamlit_autorefresh import st_autorefresh
 
-# 🔄 Auto-refresh every 60 seconds
-st_autorefresh(interval=60 * 1000, key="datarefresh")
+# Set up auto-refresh every 60 seconds
+st_autorefresh(interval=60 * 1000, key="refresh")
 
-st.title("📈 Bitcoin Price Predictor (BTC/USD)")
+# Title of the app
+st.title("Bitcoin Price Predictor (BTC/USD)")
 
-# 📥 Load live BTC/USD data
-def load_data():
-    df = yf.download("BTC-USD", period="1d", interval="1m")
-    df.dropna(inplace=True)
-    return df
+# Download 1-day of 1-minute BTC-USD data
+data = yf.download("BTC-USD", period="1d", interval="1m")
 
-df = load_data()
+# Handle column naming for Close price (account for potential multi-index or ticker suffix)
+if isinstance(data.columns, pd.MultiIndex):
+    # Flatten multi-index columns
+    data.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in data.columns]
+# Identify the close price column name dynamically
+close_cols = [c for c in data.columns if str(c).lower().startswith('close')]
+if close_cols:
+    close_col = close_cols[0]
+else:
+    st.error("Close price column not found in data.")
+    st.stop()
 
-# 🧠 Dynamically find the close column (e.g., Close_BTC-USD)
-close_col = [col for col in df.columns if "Close" in col][0]
+close_series = data[close_col]
 
-# 🧮 Add indicators
-def add_indicators(df, close_col):
-    close = df[close_col].squeeze()
-    df['rsi'] = ta.momentum.RSIIndicator(close=close).rsi()
-    df['macd'] = ta.trend.MACD(close=close).macd()
-    df['ema'] = ta.trend.EMAIndicator(close=close, window=20).ema_indicator()
-    df['roc'] = ta.momentum.ROCIndicator(close=close).roc()
-    df['bb_width'] = (
-        ta.volatility.BollingerBands(close=close).bollinger_hband() -
-        ta.volatility.BollingerBands(close=close).bollinger_lband()
-    )
-    df['target'] = df[close_col].shift(-3)
-    df.dropna(inplace=True)
-    return df
+# Calculate technical indicators
+rsi = RSIIndicator(close_series, window=14).rsi()
+ema = EMAIndicator(close_series, window=14).ema_indicator()
+macd_indicator = MACD(close_series, window_slow=26, window_fast=12, window_sign=9)
+macd_line = macd_indicator.macd()            # MACD line
+roc = ROCIndicator(close_series, window=12).roc()
+bb_indicator = BollingerBands(close_series, window=20, window_dev=2)
+bb_width = bb_indicator.bollinger_wband()    # Bollinger Band Width
 
-df = add_indicators(df, close_col)
+# Prepare feature DataFrame
+features_df = pd.DataFrame({
+    'Close': close_series,
+    'RSI': rsi,
+    'EMA': ema,
+    'MACD': macd_line,
+    'ROC': roc,
+    'BB_width': bb_width
+})
 
-# 🧠 Features + labels
-features = ['rsi', 'macd', 'ema', 'roc', 'bb_width']
-x = df[features]
-y = df['target']
+# Prepare target variable (price 3 minutes into the future)
+target = close_series.shift(-3)
+# Combine features and target, drop rows with NaNs (initial periods and the last 3 rows without future target)
+model_df = pd.concat([features_df, target.rename('Target')], axis=1).dropna()
 
-# 🎯 Train model
+# Train Random Forest model
+X_train = model_df[['Close', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']]
+y_train = model_df['Target']
 model = RandomForestRegressor(n_estimators=100, random_state=42)
-model.fit(x[:-10], y[:-10])  # Leave last 10 for prediction
+model.fit(X_train, y_train)
 
-# 📈 Predict next 3-minute price
-latest = x[-1:]
-predicted_price = model.predict(latest)[0]
-actual_price = df[close_col].iloc[-1]
-error_margin = abs(predicted_price - actual_price)
+# Backfill predictions for historical data (to compare actual vs predicted)
+train_preds = model.predict(X_train)
+# Align predictions to the correct timestamps (shift forward by 3 minutes to match the target time)
+pred_index = model_df.index + pd.Timedelta(minutes=3)
+pred_series = pd.Series(train_preds, index=pred_index)
+# Add the Predicted column to the main data frame (will align by index)
+data['Predicted'] = pred_series
 
-# 📊 Display results
-st.subheader("📊 Live Prediction")
-st.metric("Actual Price", f"${actual_price:,.2f}")
-st.metric("Predicted Price (3min)", f"${predicted_price:,.2f}")
-st.metric("Difference", f"${error_margin:,.2f}")
+# Make prediction for the latest available data point (3 minutes into the future)
+latest_features = features_df.iloc[-1][['Close', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']].values.reshape(1, -1)
+future_pred_price = model.predict(latest_features)[0]
+latest_actual_price = float(close_series.iloc[-1])
 
-# 📉 Plot chart
-st.subheader("📉 BTC Price vs Prediction")
-df['Predicted'] = np.append(model.predict(x[:-1]), [predicted_price])
-st.line_chart(df.loc[:, [close_col, "Predicted"]].tail(50))
+# Display metrics: Actual Price, Predicted Price (3min ahead), and Difference
+col1, col2, col3 = st.columns(3)
+col1.metric("Actual Price", f"${latest_actual_price:,.2f}")
+col2.metric("Predicted Price (3min)", f"${future_pred_price:,.2f}")
+price_diff = future_pred_price - latest_actual_price
+# Show difference with a plus/minus sign
+col3.metric("Difference", f"{price_diff:+.2f}")
 
-st.caption("🚨 AI model forecasts BTC price 3 minutes ahead. Auto-refreshes every 60 seconds.")
+# Plot the actual vs. predicted price for the last 50 data points
+st.subheader("Actual vs Predicted Price (Last 50 points)")
+chart_df = pd.DataFrame({
+    "Actual": close_series,
+    "Predicted": data['Predicted']
+})
+st.line_chart(chart_df.tail(50))
+
+# Disclaimer note
+st.caption("Note: This is a basic predictive demo and not financial advice.")
+
