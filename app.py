@@ -18,28 +18,34 @@ st.caption("Live prediction bot using real-time indicators and Random Forest")
 # 📥 Load BTC/USD data
 df = yf.download("BTC-USD", period="1d", interval="1m")
 
-# Check if data is valid
+# 🧾 Validate data
 if df.empty or 'Close' not in df.columns:
     st.error("Failed to load BTC data. Try again later.")
     st.stop()
 
-# 🧾 Reset index and normalize column names
+# 🧾 Reset index and guarantee 'Datetime' column
 df = df.reset_index()
-df.rename(columns={'index': 'Datetime', 'Date': 'Datetime'}, inplace=True)
 if 'Datetime' not in df.columns:
-    st.error("Missing 'Datetime' column.")
-    st.stop()
+    if 'index' in df.columns:
+        df.rename(columns={'index': 'Datetime'}, inplace=True)
+    elif 'Date' in df.columns:
+        df.rename(columns={'Date': 'Datetime'}, inplace=True)
+    elif 'datetime' in df.columns:
+        df.rename(columns={'datetime': 'Datetime'}, inplace=True)
+
+if 'Datetime' not in df.columns:
+    df.insert(0, 'Datetime', pd.to_datetime(df.index))
 
 df.dropna(inplace=True)
 
-# ✅ Force 'Close' to be a proper 1D Series
+# ✅ Create 1D Close series
 try:
     close_series = pd.Series(df['Close'].values.flatten(), index=df.index)
 except Exception as e:
     st.error(f"Failed to prepare Close series: {e}")
     st.stop()
 
-# 🧮 Technical Indicators
+# 🧮 Add indicators
 try:
     df['RSI'] = RSIIndicator(close=close_series).rsi()
     df['EMA'] = EMAIndicator(close=close_series, window=14).ema_indicator()
@@ -47,14 +53,14 @@ try:
     df['ROC'] = ROCIndicator(close=close_series).roc()
     df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
 except Exception as e:
-    st.error(f"Failed to calculate indicators: {e}")
+    st.error(f"Indicator calculation error: {e}")
     st.stop()
 
-# 🎯 Prediction Target
+# 🎯 Create target
 df['Target'] = close_series.shift(-3)
 df.dropna(inplace=True)
 
-# 🤖 Train Model
+# 🤖 Train model
 features = ['Close', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
 y = df['Target']
@@ -62,27 +68,26 @@ model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# 🔮 Make Prediction
+# 🔮 Make prediction
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 price_diff = future_price - actual_price
 
-# 📊 Live Metrics
+# 📊 Live metrics
 st.subheader("📊 Live Prediction")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual", f"${actual_price:,.2f}")
 col2.metric("Predicted (3min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
-# 📈 Interactive Chart
+# 📈 Chart with indicator toggles
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="indicator_selector")
 
-if 'Datetime' in df.columns:
+if selected and 'Datetime' in df.columns:
     existing = [col for col in selected if col in df.columns]
-
     if existing:
         try:
             melted = df[['Datetime'] + existing].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
@@ -103,6 +108,6 @@ if 'Datetime' in df.columns:
         except Exception as e:
             st.error(f"Chart generation failed: {e}")
     else:
-        st.warning("No valid indicators selected to display.")
+        st.warning("Selected indicators are not in the data.")
 else:
-    st.error("Missing 'Datetime' column in data.")
+    st.warning("Select at least one indicator to generate the chart.")
