@@ -63,10 +63,49 @@ col1.metric("Actual", f"${actual_price:,.2f}")
 col2.metric("Predicted (3min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
-# 📉 BTC Chart
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
+
+# Confirm all selected columns exist in df
+existing = [col for col in selected if col in df.columns]
+base_cols = ['Datetime']
+all_cols = base_cols + existing
+
+st.subheader("📈 BTC Chart (Toggle Indicators)")
+options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
+selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
+
+# Confirm all selected columns exist in df
+existing = [col for col in selected if col in df.columns]
+base_cols = ['Datetime']
+all_cols = base_cols + existing
+
+if all(col in df.columns for col in base_cols):
+    if existing:
+        try:
+            melted = df[all_cols].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
+
+            highlight = alt.selection_multi(fields=['Metric'], bind='legend')
+
+            chart = alt.Chart(melted).mark_line().encode(
+                x='Datetime:T',
+                y='Value:Q',
+                color='Metric:N',
+                tooltip=['Datetime:T', 'Metric:N', 'Value:Q'],
+                opacity=alt.condition(highlight, alt.value(1), alt.value(0.1))
+            ).add_selection(
+                highlight
+            ).interactive()
+
+            st.altair_chart(chart, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Chart generation failed: {e}")
+    else:
+        st.warning("Select at least one valid indicator to show the chart.")
+else:
+    st.error("Required 'Datetime' column is missing from data.")
 
 # ✅ Filter to only columns that actually exist
 existing = [col for col in selected if col in df.columns]
