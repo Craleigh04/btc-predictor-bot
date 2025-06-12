@@ -17,9 +17,9 @@ st.caption("Live prediction bot using real-time indicators and Random Forest")
 
 # 📈 Download BTC data
 df = yf.download("BTC-USD", period="1d", interval="1m")
-
-# Ensure 'Datetime' column exists
 df = df.reset_index()
+
+# 🧾 Ensure 'Datetime' column exists
 if 'Datetime' not in df.columns:
     if 'index' in df.columns:
         df.rename(columns={'index': 'Datetime'}, inplace=True)
@@ -63,13 +63,12 @@ col1.metric("Actual", f"${actual_price:,.2f}")
 col2.metric("Predicted (3min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
-# ✅ NOW move the chart section HERE (after Predicted exists)
+# 📉 BTC Chart
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
 
-if selected:
-    # Filter to existing columns only
+# ✅ Filter to only columns that actually exist
 existing = [col for col in selected if col in df.columns]
 
 if existing:
@@ -89,20 +88,4 @@ if existing:
 
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.warning("None of the selected indicators are available yet.")
-    
-    highlight = alt.selection_multi(fields=['Metric'], bind='legend')
-
-    chart = alt.Chart(melted).mark_line().encode(
-        x='Datetime:T',
-        y='Value:Q',
-        color='Metric:N',
-        tooltip=['Datetime:T', 'Metric:N', 'Value:Q'],
-        opacity=alt.condition(highlight, alt.value(1), alt.value(0.1))
-    ).add_selection(
-        highlight
-    ).interactive()
-
-    st.altair_chart(chart, use_container_width=True)
-else:
-    st.warning("Select at least one indicator to view the chart.")
+    st.warning("Select at least one available indicator to show the chart.")
