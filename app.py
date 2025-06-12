@@ -17,7 +17,15 @@ st.caption("Live prediction bot using real-time indicators and Random Forest")
 
 # 📈 Download BTC data
 df = yf.download("BTC-USD", period="1d", interval="1m")
+df = df.reset_index() 
+
+df = yf.download("BTC-USD", period="1d", interval="1m")
+
+# Reset index and guarantee 'Datetime' exists
 df = df.reset_index()
+df.columns = [col if col != 'index' else 'Datetime' for col in df.columns]
+df.rename(columns={'Date': 'Datetime'}, inplace=True)
+
 
 # 🧾 Ensure 'Datetime' column exists
 if 'Datetime' not in df.columns:
@@ -67,25 +75,13 @@ st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="indicator_selector")
 
+# Check and filter columns
+if 'Datetime' in df.columns:
+    existing = [col for col in selected if col in df.columns]
 
-# Confirm all selected columns exist in df
-existing = [col for col in selected if col in df.columns]
-base_cols = ['Datetime']
-all_cols = base_cols + existing
-
-st.subheader("📈 BTC Chart (Toggle Indicators)")
-options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'])
-
-# Confirm all selected columns exist in df
-existing = [col for col in selected if col in df.columns]
-base_cols = ['Datetime']
-all_cols = base_cols + existing
-
-if all(col in df.columns for col in base_cols):
     if existing:
         try:
-            melted = df[all_cols].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
+            melted = df[['Datetime'] + existing].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
 
             highlight = alt.selection_multi(fields=['Metric'], bind='legend')
 
@@ -100,13 +96,13 @@ if all(col in df.columns for col in base_cols):
             ).interactive()
 
             st.altair_chart(chart, use_container_width=True)
-
         except Exception as e:
             st.error(f"Chart generation failed: {e}")
     else:
-        st.warning("Select at least one valid indicator to show the chart.")
+        st.warning("No valid indicators available to chart.")
 else:
-    st.error("Required 'Datetime' column is missing from data.")
+    st.error("Datetime column not found in DataFrame.")
+
 
 # ✅ Filter to only columns that actually exist
 existing = [col for col in selected if col in df.columns]
