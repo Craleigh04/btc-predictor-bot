@@ -17,27 +17,25 @@ st.caption("Live prediction bot using real-time indicators and Random Forest")
 
 # 📈 Download BTC data
 df = yf.download("BTC-USD", period="1d", interval="1m")
-df = df.reset_index() 
 
-df = yf.download("BTC-USD", period="1d", interval="1m")
+# Check if data is valid
+if df.empty or 'Close' not in df.columns:
+    st.error("Failed to load BTC data. Try again later.")
+    st.stop()
 
-# Reset index and guarantee 'Datetime' exists
+# Reset index and ensure 'Datetime' exists
 df = df.reset_index()
-df.columns = [col if col != 'index' else 'Datetime' for col in df.columns]
-df.rename(columns={'Date': 'Datetime'}, inplace=True)
+df.rename(columns={'index': 'Datetime', 'Date': 'Datetime'}, inplace=True)
 
-
-# 🧾 Ensure 'Datetime' column exists
+# 🧾 Ensure 'Datetime' column
 if 'Datetime' not in df.columns:
-    if 'index' in df.columns:
-        df.rename(columns={'index': 'Datetime'}, inplace=True)
-    elif 'Date' in df.columns:
-        df.rename(columns={'Date': 'Datetime'}, inplace=True)
+    st.error("Missing 'Datetime' column in data.")
+    st.stop()
 
 df.dropna(inplace=True)
 
 # ✅ Safe close series
-close_series = pd.Series(df['Close'].values.squeeze(), index=df.index)
+close_series = df['Close']
 
 # 🧮 Calculate indicators
 df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -71,11 +69,17 @@ col1.metric("Actual", f"${actual_price:,.2f}")
 col2.metric("Predicted (3min)", f"${future_price:,.2f}")
 col3.metric("Difference", f"{price_diff:+.2f}")
 
+# 📉 BTC Chart
 st.subheader("📈 BTC Chart (Toggle Indicators)")
 options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select lines to display", options, default=['Close', 'EMA', 'Predicted'], key="indicator_selector")
+selected = st.multiselect(
+    "Select lines to display",
+    options,
+    default=['Close', 'EMA', 'Predicted'],
+    key="indicator_selector"
+)
 
-# Check and filter columns
+# Build chart only if valid
 if 'Datetime' in df.columns:
     existing = [col for col in selected if col in df.columns]
 
@@ -99,29 +103,6 @@ if 'Datetime' in df.columns:
         except Exception as e:
             st.error(f"Chart generation failed: {e}")
     else:
-        st.warning("No valid indicators available to chart.")
+        st.warning("No valid indicators selected to display.")
 else:
-    st.error("Datetime column not found in DataFrame.")
-
-
-# ✅ Filter to only columns that actually exist
-existing = [col for col in selected if col in df.columns]
-
-if existing:
-    melted = df[['Datetime'] + existing].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
-
-    highlight = alt.selection_multi(fields=['Metric'], bind='legend')
-
-    chart = alt.Chart(melted).mark_line().encode(
-        x='Datetime:T',
-        y='Value:Q',
-        color='Metric:N',
-        tooltip=['Datetime:T', 'Metric:N', 'Value:Q'],
-        opacity=alt.condition(highlight, alt.value(1), alt.value(0.1))
-    ).add_selection(
-        highlight
-    ).interactive()
-
-    st.altair_chart(chart, use_container_width=True)
-else:
-    st.warning("Select at least one available indicator to show the chart.")
+    st.error("Missing 'Datetime' column in data.")
