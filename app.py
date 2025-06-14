@@ -33,20 +33,27 @@ def load_btc_data():
     else:
         df = pd.DataFrame()
 
+    # Always fetch new recent data
     recent = yf.download("BTC-USD", period="1d", interval="1m")
     if not recent.empty:
         recent.reset_index(inplace=True)
-        recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+        # Normalize any possible datetime column name
+        if 'Datetime' not in recent.columns:
+            for col in ['datetime', 'Date', 'date', 'index']:
+                if col in recent.columns:
+                    recent.rename(columns={col: 'Datetime'}, inplace=True)
         recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
     else:
         recent = pd.DataFrame(columns=['Datetime'])
 
     combined = pd.concat([df, recent], ignore_index=True)
 
+    # ✅ Robust check before using the column
     if 'Datetime' not in combined.columns:
-        st.error("Critical error: 'Datetime' column is missing from combined data.")
+        st.error("Critical error: Combined data is missing 'Datetime' column.")
         return pd.DataFrame()
 
+    # ✅ Only proceed after checking presence
     combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
     combined = combined.dropna(subset=['Datetime'])
     combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
