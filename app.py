@@ -73,6 +73,11 @@ df = df.dropna().reset_index(drop=True)
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
 y = df['Target']
+
+if X.empty or y.empty:
+    st.error("Not enough data to train model.")
+    st.stop()
+
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
@@ -151,12 +156,14 @@ if selected:
             type="date",
             tickformat="%H:%M",
             rangeslider_visible=True,
-            rangeselector=dict(buttons=list([
-                dict(count=1, label="1h", step="hour", stepmode="backward"),
-                dict(count=6, label="6h", step="hour", stepmode="backward"),
-                dict(count=24, label="24h", step="hour", stepmode="backward"),
-                dict(step="all")
-            ]))
+            rangeselector=dict(
+                buttons=[
+                    dict(count=1, label="1h", step="hour", stepmode="backward"),
+                    dict(count=6, label="6h", step="hour", stepmode="backward"),
+                    dict(count=24, label="24h", step="hour", stepmode="backward"),
+                    dict(step="all")
+                ]
+            )
         ),
         yaxis_title="Value",
         margin=dict(l=30, r=30, t=40, b=30),
