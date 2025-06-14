@@ -17,7 +17,28 @@ st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
 st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
 # Download BTC/USD data
-df = yf.download("BTC-USD", period="7d", interval="1m")
+import os
+import pathlib
+
+CACHE_FILE = "btc_data_cache.csv"
+
+if os.path.exists(CACHE_FILE):
+    df = pd.read_csv(CACHE_FILE, parse_dates=['Datetime'])
+    df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
+else:
+    df = yf.download("BTC-USD", period="7d", interval="1m")
+    df = df.reset_index()
+    df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+    df.to_csv(CACHE_FILE, index=False)
+
+# Refresh current 1m data and append to cache
+recent = yf.download("BTC-USD", period="1d", interval="1m")
+recent = recent.reset_index()
+recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+recent['Datetime'] = pd.to_datetime(recent['Datetime'])
+df = pd.concat([df, recent], ignore_index=True)
+df = df.drop_duplicates(subset='Datetime').sort_values('Datetime').reset_index(drop=True)
+df.to_csv(CACHE_FILE, index=False)
 
 # Flatten MultiIndex columns if needed
 if isinstance(df.columns, pd.MultiIndex):
