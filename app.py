@@ -1,5 +1,5 @@
 import streamlit as st
-st.set_page_config(layout="wide")  # ✅ must be first Streamlit command
+st.set_page_config(layout="wide")
 
 import yfinance as yf
 import pandas as pd
@@ -23,6 +23,8 @@ def load_btc_data():
     if os.path.exists(CACHE_FILE):
         try:
             df = pd.read_csv(CACHE_FILE)
+            if 'Datetime' not in df.columns:
+                raise ValueError("Cached file missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
             df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
         except Exception as e:
@@ -31,7 +33,6 @@ def load_btc_data():
     else:
         df = pd.DataFrame()
 
-    # Get recent data from Yahoo Finance
     recent = yf.download("BTC-USD", period="1d", interval="1m")
     if not recent.empty:
         recent.reset_index(inplace=True)
