@@ -23,7 +23,7 @@ import pathlib
 CACHE_FILE = "btc_data_cache.csv"
 
 if os.path.exists(CACHE_FILE):
-    df = pd.read_csv(CACHE_FILE, parse_dates=['Datetime'])
+    df = pd.read_csv(CACHE_FILE)
     df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
     df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
 else:
