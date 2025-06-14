@@ -25,8 +25,7 @@ def load_btc_data():
         df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
         df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
     else:
-        df = yf.download("BTC-USD", period="7d", interval="1m")
-        df = df.reset_index()
+        df = yf.download("BTC-USD", period="7d", interval="1m").reset_index()
         df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
         df.to_csv(CACHE_FILE, index=False)
 
@@ -67,11 +66,17 @@ except Exception as e:
     st.error(f"Error calculating indicators: {e}")
     st.stop()
 
-# Prediction setup
+# Target and Features
 df['Target'] = close_series.shift(-3)
-df = df.dropna().reset_index(drop=True)
-
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
+df = df.dropna(subset=features + ['Target']).reset_index(drop=True)
+
+# Abort if no data
+if df.empty:
+    st.error("Not enough clean data to make predictions. Try again soon.")
+    st.stop()
+
+# Model training
 X = df[features]
 y = df['Target']
 model = RandomForestRegressor(n_estimators=100, random_state=42)
@@ -83,12 +88,11 @@ df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', 
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
-# Live prediction display
+# Live prediction
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
-price_diff = future_price - actual_price
 
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
@@ -110,7 +114,7 @@ else:
     st.error("Datetime column missing or incorrectly formatted.")
     st.stop()
 
-# Chart
+# Chart display
 options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
