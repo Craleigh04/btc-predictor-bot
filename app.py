@@ -17,7 +17,7 @@ st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
 st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
 # Download BTC/USD data
-df = yf.download("BTC-USD", start="2021-01-01", interval="1m")
+df = yf.download("BTC-USD", period="7d", interval="1m")
 
 # Flatten MultiIndex columns if needed
 if isinstance(df.columns, pd.MultiIndex):
