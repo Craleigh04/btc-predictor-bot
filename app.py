@@ -17,7 +17,7 @@ st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
 st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
 # Download BTC/USD data
-df = yf.download("BTC-USD", period="1d", interval="1m")
+df = yf.download("BTC-USD", start="2021-01-01", interval="1m")
 
 # Flatten MultiIndex columns if needed
 if isinstance(df.columns, pd.MultiIndex):
@@ -86,8 +86,8 @@ price_diff = future_price - actual_price
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual Price", f"${actual_price:,.2f}")
-col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
-col3.metric("Predicted for", predicted_time.strftime("%H:%M:%S"))
+col2.metric("Predicted Price", f"${future_price:,.2f}")
+col3.metric("For Time", predicted_time.strftime("%H:%M:%S"))
 
 # Time range toggle
 st.subheader("Indicator Trend Visualization")
@@ -141,7 +141,18 @@ if selected:
         hovermode="x unified",
         xaxis_title="Datetime",
         yaxis_title="Value",
-        xaxis=dict(tickformat="%H:%M"),
+        xaxis=dict(
+            tickformat="%H:%M",
+            rangeslider_visible=True,
+            rangeselector=dict(buttons=list([
+                dict(count=1, label="1h", step="hour", stepmode="backward"),
+                dict(count=6, label="6h", step="hour", stepmode="backward"),
+                dict(count=24, label="24h", step="hour", stepmode="backward"),
+                dict(step="all")
+            ])),
+            type="date"
+        ),
+        dragmode="pan",
         margin=dict(l=40, r=40, t=50, b=40)
     )
 
