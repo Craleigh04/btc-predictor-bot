@@ -11,162 +11,125 @@ from ta.volatility import BollingerBands
 from streamlit_autorefresh import st_autorefresh
 import os
 
-# Auto-refresh every 60 seconds
+# 🔁 Refresh every 60s
 st_autorefresh(interval=60 * 1000, key="refresh")
 
 st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
 st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
+# 📦 Cache file
 CACHE_FILE = "btc_data_cache.csv"
 
-if os.path.exists(CACHE_FILE):
-    df = pd.read_csv(CACHE_FILE)
-    df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
-    df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]
-else:
-    df = yf.download("BTC-USD", period="7d", interval="1m")
-    df = df.reset_index()
-    df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+# 🧠 Load & backfill BTC data
+def load_btc_data():
+    if os.path.exists(CACHE_FILE):
+        df = pd.read_csv(CACHE_FILE)
+        df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
+        df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]
+    else:
+        df = yf.download("BTC-USD", period="7d", interval="1m")
+        df = df.reset_index()
+        df.rename(columns={'Date': 'Datetime'}, inplace=True)
+        df.to_csv(CACHE_FILE, index=False)
+
+    # Append latest 1d
+    recent = yf.download("BTC-USD", period="1d", interval="1m").reset_index()
+    recent.rename(columns={'Date': 'Datetime'}, inplace=True)
+    recent['Datetime'] = pd.to_datetime(recent['Datetime'])
+    df = pd.concat([df, recent], ignore_index=True)
+    df = df.drop_duplicates(subset='Datetime').sort_values('Datetime').reset_index(drop=True)
     df.to_csv(CACHE_FILE, index=False)
+    return df
 
-# Refresh and append new data
-recent = yf.download("BTC-USD", period="1d", interval="1m")
-recent = recent.reset_index()
-recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-recent['Datetime'] = pd.to_datetime(recent['Datetime'])
-df = pd.concat([df, recent], ignore_index=True)
-df = df.drop_duplicates(subset='Datetime').sort_values('Datetime').reset_index(drop=True)
-df.to_csv(CACHE_FILE, index=False)
+df = load_btc_data()
 
-# Flatten MultiIndex columns if needed
-if isinstance(df.columns, pd.MultiIndex):
-    df.columns = ['_'.join(col).strip() for col in df.columns.values]
-
-if df.empty or 'Close_BTC-USD' not in df.columns:
+# 🧹 Validate
+if df.empty or 'Close' not in df.columns:
     st.error("Unable to retrieve BTC price data.")
     st.stop()
 
-df = df.reset_index()
-df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-if 'Datetime' not in df.columns:
-    df['Datetime'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='min')
-df['Datetime'] = pd.to_datetime(df['Datetime'])
-
-try:
-    close_series = pd.Series(df['Close_BTC-USD'].values.flatten(), index=df.index)
-except Exception as e:
-    st.error(f"Error preparing price series: {e}")
-    st.stop()
-
-try:
-    df['RSI'] = RSIIndicator(close=close_series).rsi()
-    df['EMA'] = EMAIndicator(close=close_series, window=14).ema_indicator()
-    df['MACD'] = MACD(close=close_series).macd()
-    df['ROC'] = ROCIndicator(close=close_series).roc()
-    df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
-except Exception as e:
-    st.error(f"Indicator calculation error: {e}")
-    st.stop()
-
+# ➕ Indicators
+df['Close'] = df['Close'].astype(float)
+close_series = df['Close'].copy()
+df['RSI'] = RSIIndicator(close=close_series).rsi()
+df['EMA'] = EMAIndicator(close=close_series, window=14).ema_indicator()
+df['MACD'] = MACD(close=close_series).macd()
+df['ROC'] = ROCIndicator(close=close_series).roc()
+df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
 df['Target'] = close_series.shift(-3)
-df = df.dropna().reset_index(drop=True)
 
-if 'Datetime' not in df.columns or df['Datetime'].isnull().any():
-    df['Datetime'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='min')
-df['Datetime'] = pd.to_datetime(df['Datetime'])
+df.dropna(inplace=True)
 
-features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
+# 🎯 Train model
+features = ['Close', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
 y = df['Target']
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
+# 🔔 Buy/Sell markers (RSI)
+df['Signal'] = np.where(df['RSI'] < 30, 'Buy',
+                np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
+# 🔮 Live forecast
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
-actual_price = close_series.iloc[-1]
-predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
+actual_price = df['Close'].iloc[-1]
 price_diff = future_price - actual_price
+predicted_time = df['Datetime'].iloc[-1] + pd.Timedelta(minutes=3)
 
+# 📊 Metrics
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
-col3.metric("Predicted Time", predicted_time.strftime("%H:%M:%S"))
+col3.metric("Predicted Time", predicted_time.strftime("%Y-%m-%d %H:%M:%S"))
 
+# 📉 Time window
 st.subheader("Indicator Trend Visualization")
-time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
-if time_range == '1h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
-elif time_range == '6h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+time_window = st.radio("Select time window:", ["1h", "6h", "24h"], horizontal=True)
+if time_window == "1h":
+    df_plot = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
+elif time_window == "6h":
+    df_plot = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
 else:
-    df_filtered = df.copy()
+    df_plot = df
 
-options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select indicators to display:", options, default=['Close_BTC-USD', 'EMA', 'Predicted'], key="chart_selector")
+# ✅ Choose indicators
+options = ['Close', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
+selected = st.multiselect("Select indicators to display:", options, default=['Close', 'EMA', 'Predicted'])
 
 if selected:
-    plot_df = df_filtered[['Datetime'] + selected].copy()
-    melted = plot_df.melt(id_vars='Datetime', var_name='Metric', value_name='Value')
+    melted = df_plot[['Datetime'] + selected].melt(id_vars='Datetime', var_name='Metric', value_name='Value')
 
-    fig = px.line(
-        melted,
-        x='Datetime',
-        y='Value',
-        color='Metric',
-        hover_data={"Datetime": True, "Value": ":.2f", "Metric": True},
-        title="BTC/USD Technical Indicators"
-    )
+    fig = px.line(melted, x='Datetime', y='Value', color='Metric',
+                  hover_data={"Datetime": True, "Value": ":.2f", "Metric": True},
+                  title="BTC/USD Technical Indicators")
 
     fig.add_trace(go.Scatter(
         x=buy_signals['Datetime'],
-        y=buy_signals['Close_BTC-USD'],
+        y=buy_signals['Close'],
         mode='markers',
-        marker=dict(color='green', size=8, symbol='triangle-up'),
-        name='Buy Signal'
+        name='Buy Signal',
+        marker=dict(color='green', size=9, symbol='triangle-up')
     ))
     fig.add_trace(go.Scatter(
         x=sell_signals['Datetime'],
-        y=sell_signals['Close_BTC-USD'],
+        y=sell_signals['Close'],
         mode='markers',
-        marker=dict(color='red', size=8, symbol='triangle-down'),
-        name='Sell Signal'
+        name='Sell Signal',
+        marker=dict(color='red', size=9, symbol='triangle-down')
     ))
-
-    fig.update_traces(hovertemplate='%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f} %{fullData.name}')
 
     fig.update_layout(
         hovermode="x unified",
-        xaxis_title="Datetime",
-        yaxis_title="Value",
-        xaxis=dict(
-            tickformat="%H:%M",
-            rangeslider_visible=True,
-            rangeselector=dict(buttons=list([
-                dict(count=1, label="1h", step="hour", stepmode="backward"),
-                dict(count=6, label="6h", step="hour", stepmode="backward"),
-                dict(count=24, label="24h", step="hour", stepmode="backward"),
-                dict(step="all")
-            ])),
-            type="date"
-        ),
         dragmode="pan",
-        margin=dict(l=40, r=40, t=50, b=40)
+        xaxis=dict(rangeslider_visible=True, tickformat="%H:%M"),
+        margin=dict(l=30, r=30, t=50, b=30)
     )
-
-    ymin = melted['Value'].min() * 0.995
-    ymax = melted['Value'].max() * 1.005
-    fig.update_yaxes(range=[ymin, ymax])
-    fig.update_traces(line=dict(width=2.5))
-
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.warning("Please select at least one indicator to display the graph.")
-
-
-
+    st.warning("Please select at least one indicator.")
