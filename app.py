@@ -1,4 +1,6 @@
 import streamlit as st
+st.set_page_config(layout="wide")
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -11,9 +13,7 @@ from ta.volatility import BollingerBands
 from streamlit_autorefresh import st_autorefresh
 import os
 
-st.set_page_config(layout="wide")
 st_autorefresh(interval=60 * 1000, key="refresh")
-
 st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
 st.caption("Real-time BTC/USD forecast using technical indicators and Random Forest")
 
@@ -23,6 +23,7 @@ def load_btc_data():
     if os.path.exists(CACHE_FILE):
         try:
             df = pd.read_csv(CACHE_FILE)
+            df.rename(columns=lambda x: x.strip(), inplace=True)
             if 'Datetime' not in df.columns:
                 raise ValueError("Cached file missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
@@ -33,7 +34,6 @@ def load_btc_data():
     else:
         df = pd.DataFrame()
 
-    # Fetch live data
     recent = yf.download("BTC-USD", period="1d", interval="1m")
     if not recent.empty:
         recent.reset_index(inplace=True)
@@ -45,29 +45,34 @@ def load_btc_data():
     combined = pd.concat([df, recent], ignore_index=True)
 
     if 'Datetime' not in combined.columns:
-        st.error("Critical error: 'Datetime' column is missing.")
+        st.error("Critical error: 'Datetime' column is missing from combined data.")
         return pd.DataFrame()
 
     combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
+
+    if combined['Datetime'].isnull().all():
+        st.error("All Datetime values are null.")
+        return pd.DataFrame()
+
     combined = combined.dropna(subset=['Datetime'])
     combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
     combined.to_csv(CACHE_FILE, index=False)
     return combined
 
-# Load and validate data
+# Load data
 df = load_btc_data()
 if 'Close' in df.columns:
     df.rename(columns={'Close': 'Close_BTC-USD'}, inplace=True)
 
 if df.empty or 'Close_BTC-USD' not in df.columns:
-    st.error("Unable to retrieve or process BTC price data.")
+    st.error("Unable to retrieve BTC price data.")
     st.stop()
 
 if len(df) < 50:
-    st.warning("Not enough historical data to train the model. Please wait for more data.")
+    st.warning("Not enough historical data to train the model. Please wait for more data to accumulate.")
     st.stop()
 
-# Calculate indicators
+# Indicators
 try:
     close_series = df['Close_BTC-USD']
     df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -76,10 +81,10 @@ try:
     df['ROC'] = ROCIndicator(close=close_series).roc()
     df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
 except Exception as e:
-    st.error(f"Indicator error: {e}")
+    st.error(f"Error calculating indicators: {e}")
     st.stop()
 
-# Prepare target
+# Target setup
 df['Target'] = close_series.shift(-3)
 df = df.dropna().reset_index(drop=True)
 
@@ -88,20 +93,20 @@ X = df[features]
 y = df['Target']
 
 if len(df) < 50:
-    st.warning("Still not enough processed data to train model.")
+    st.warning("Still not enough processed data to build model.")
     st.stop()
 
-# Train model
+# Model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# Buy/Sell signals
+# Buy/Sell Signal
 df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
-# Live forecast
+# Live Prediction
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
@@ -113,7 +118,7 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Chart Controls
+# Visualization Controls
 st.subheader("Indicator Trend Visualization")
 time_window = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
@@ -170,4 +175,4 @@ if selected:
 
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.warning("Select indicators to view the chart.")
+    st.warning("Please select indicators to display the chart.")
