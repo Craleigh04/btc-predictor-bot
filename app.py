@@ -152,15 +152,19 @@ if selected:
             x=buy_signals['Datetime'],
             y=buy_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='green', size=8, symbol='triangle-up'),
-            name='Buy Signal'
+            marker=dict(color='green', size=6, symbol='triangle-up', opacity=0.7),
+            name='Buy Signal',
+            legendgroup='signals',
+            showlegend=True
         ))
         fig.add_trace(go.Scatter(
             x=sell_signals['Datetime'],
             y=sell_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='red', size=8, symbol='triangle-down'),
-            name='Sell Signal'
+            marker=dict(color='red', size=6, symbol='triangle-down', opacity=0.7),
+            name='Sell Signal',
+            legendgroup='signals',
+            showlegend=True
         ))
 
     fig.update_layout(
@@ -169,15 +173,7 @@ if selected:
             title="Datetime",
             type="date",
             tickformat="%H:%M",
-            rangeslider_visible=True,
-            rangeselector=dict(
-                buttons=[
-                    dict(count=1, label="1h", step="hour", stepmode="backward"),
-                    dict(count=6, label="6h", step="hour", stepmode="backward"),
-                    dict(count=24, label="24h", step="hour", stepmode="backward"),
-                    dict(step="all")
-                ]
-            )
+            rangeslider_visible=True
         ),
         yaxis_title="Value",
         margin=dict(l=30, r=30, t=40, b=30),
