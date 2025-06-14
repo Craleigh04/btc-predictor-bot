@@ -19,6 +19,7 @@ st.caption("Real-time BTC/USD forecast using technical indicators and Random For
 
 CACHE_FILE = "btc_data_cache.csv"
 
+
 def load_btc_data():
     if os.path.exists(CACHE_FILE):
         df = pd.read_csv(CACHE_FILE)
@@ -30,7 +31,6 @@ def load_btc_data():
         df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
         df.to_csv(CACHE_FILE, index=False)
 
-    # Refresh latest 1 day
     recent = yf.download("BTC-USD", period="1d", interval="1m").reset_index()
     recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
     recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
@@ -41,6 +41,7 @@ def load_btc_data():
     df = df.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
     df.to_csv(CACHE_FILE, index=False)
     return df
+
 
 # Load and verify data
 df = load_btc_data()
@@ -117,6 +118,7 @@ else:
     st.stop()
 
 # Chart
+st.markdown("""<style>.stMultiSelect{margin-bottom: 1rem;}</style>""", unsafe_allow_html=True)
 display_options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", display_options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
