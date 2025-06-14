@@ -11,7 +11,6 @@ from ta.volatility import BollingerBands
 from streamlit_autorefresh import st_autorefresh
 import os
 
-# Auto-refresh every 60 seconds
 st_autorefresh(interval=60 * 1000, key="refresh")
 
 st.title("Bitcoin Momentum Analyzer Bot (BTC/USD)")
@@ -19,43 +18,42 @@ st.caption("Real-time BTC/USD forecast using technical indicators and Random For
 
 CACHE_FILE = "btc_data_cache.csv"
 
+
 def load_btc_data():
-    # Remove broken cache if it exists
     if os.path.exists(CACHE_FILE):
-        df = pd.read_csv(CACHE_FILE)
-        if 'Datetime' not in df.columns:
-            st.warning("Removing corrupted cache file: missing 'Datetime' column.")
-            os.remove(CACHE_FILE)
-            df = pd.DataFrame()
-        else:
+        try:
+            df = pd.read_csv(CACHE_FILE)
+            if 'Datetime' not in df.columns:
+                raise ValueError("Cached file missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
             df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
+        except Exception as e:
+            st.warning(f"Error loading cached data: {e}")
+            df = pd.DataFrame()
     else:
         df = pd.DataFrame()
 
-    # Get recent live data
-    recent = yf.download("BTC-USD", period="1d", interval="1m", auto_adjust=False)
+    recent = yf.download("BTC-USD", period="1d", interval="1m")
     if not recent.empty:
-        recent = recent.reset_index()
-        if 'Datetime' not in recent.columns:
-            recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+        if isinstance(recent.index, pd.DatetimeIndex):
+            recent = recent.reset_index()
+        recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
         recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
     else:
         recent = pd.DataFrame(columns=['Datetime'])
 
-    # Combine and clean
     combined = pd.concat([df, recent], ignore_index=True)
     if 'Datetime' not in combined.columns:
-        st.error("Failed to retrieve datetime data.")
+        st.error("Failed to retrieve 'Datetime' column from price data.")
         return pd.DataFrame()
 
     combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
     combined = combined.dropna(subset=['Datetime'])
     combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
 
-    # Save clean cache
     combined.to_csv(CACHE_FILE, index=False)
     return combined
+
 
 # Load and verify data
 df = load_btc_data()
@@ -69,7 +67,10 @@ if df.empty or 'Close_BTC-USD' not in df.columns:
     st.error("Unable to retrieve BTC price data.")
     st.stop()
 
-# Indicators
+if len(df) < 50:
+    st.warning("Not enough historical data to train the model. Please wait for more data to accumulate.")
+    st.stop()
+
 try:
     close_series = df['Close_BTC-USD']
     df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -85,16 +86,12 @@ except Exception as e:
 df['Target'] = close_series.shift(-3)
 df = df.dropna().reset_index(drop=True)
 
-if len(df) < 50:
-    st.error("Not enough clean data available to train the model. Try again in a few minutes.")
-    st.stop()
-
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
 y = df['Target']
 
-if X.empty or y.empty:
-    st.error("Not enough data to train model.")
+if len(df) < 50:
+    st.warning("Still not enough processed data to build model. Waiting for more to accumulate...")
     st.stop()
 
 model = RandomForestRegressor(n_estimators=100, random_state=42)
@@ -111,7 +108,6 @@ latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
-price_diff = future_price - actual_price
 
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
@@ -175,12 +171,7 @@ if selected:
 
     fig.update_layout(
         hovermode="x unified",
-        xaxis=dict(
-            title="Datetime",
-            type="date",
-            tickformat="%H:%M",
-            rangeslider_visible=True
-        ),
+        xaxis=dict(title="Datetime", type="date", tickformat="%H:%M", rangeslider_visible=True),
         yaxis_title="Value",
         margin=dict(l=30, r=30, t=40, b=30),
         dragmode="pan"
