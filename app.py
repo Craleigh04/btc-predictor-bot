@@ -23,7 +23,6 @@ def load_btc_data():
     if os.path.exists(CACHE_FILE):
         try:
             df = pd.read_csv(CACHE_FILE)
-            df.rename(columns=lambda x: x.strip(), inplace=True)
             if 'Datetime' not in df.columns:
                 raise ValueError("Cached file missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
@@ -35,10 +34,21 @@ def load_btc_data():
         df = pd.DataFrame()
 
     recent = yf.download("BTC-USD", period="1d", interval="1m")
+
     if not recent.empty:
         recent.reset_index(inplace=True)
-        recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-        recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
+
+        if 'Datetime' not in recent.columns:
+            if 'index' in recent.columns:
+                recent.rename(columns={'index': 'Datetime'}, inplace=True)
+            elif 'Date' in recent.columns:
+                recent.rename(columns={'Date': 'Datetime'}, inplace=True)
+
+        if 'Datetime' in recent.columns:
+            recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
+        else:
+            st.error("Failed to find a datetime column in recent data")
+            return pd.DataFrame()
     else:
         recent = pd.DataFrame(columns=['Datetime'])
 
@@ -59,7 +69,7 @@ def load_btc_data():
     combined.to_csv(CACHE_FILE, index=False)
     return combined
 
-# Load data
+# Load and verify data
 df = load_btc_data()
 if 'Close' in df.columns:
     df.rename(columns={'Close': 'Close_BTC-USD'}, inplace=True)
@@ -72,7 +82,7 @@ if len(df) < 50:
     st.warning("Not enough historical data to train the model. Please wait for more data to accumulate.")
     st.stop()
 
-# Indicators
+# Technical indicators
 try:
     close_series = df['Close_BTC-USD']
     df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -84,7 +94,7 @@ except Exception as e:
     st.error(f"Error calculating indicators: {e}")
     st.stop()
 
-# Target setup
+# Prediction
 df['Target'] = close_series.shift(-3)
 df = df.dropna().reset_index(drop=True)
 
@@ -96,17 +106,16 @@ if len(df) < 50:
     st.warning("Still not enough processed data to build model.")
     st.stop()
 
-# Model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# Buy/Sell Signal
+# Buy/Sell
 df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
-# Live Prediction
+# Live forecast
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
@@ -118,7 +127,7 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Visualization Controls
+# Chart controls
 st.subheader("Indicator Trend Visualization")
 time_window = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
@@ -130,7 +139,7 @@ elif time_window == '6h':
 else:
     df_filtered = df.copy()
 
-# Plot
+# Chart
 available_indicators = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", available_indicators, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
