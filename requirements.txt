@@ -4,5 +4,5 @@ pandas
 numpy
 scikit-learn
 ta
-altair
+plotly
 streamlit-autorefresh
