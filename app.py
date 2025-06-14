@@ -1,5 +1,5 @@
 import streamlit as st
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide")  # Must be first Streamlit command
 
 import yfinance as yf
 import pandas as pd
@@ -26,7 +26,6 @@ def load_btc_data():
             if 'Datetime' not in df.columns:
                 raise ValueError("Cached file missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
-            df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
         except Exception as e:
             st.warning(f"Error loading cached data: {e}")
             df = pd.DataFrame()
@@ -48,15 +47,17 @@ def load_btc_data():
 
     combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
     combined = combined.dropna(subset=['Datetime'])
-    combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
+    combined = combined.drop_duplicates(subset='Datetime', keep='last')
+    combined = combined.sort_values('Datetime').reset_index(drop=True)
     combined.to_csv(CACHE_FILE, index=False)
     return combined
 
-# Load and verify data
+# Load data
 df = load_btc_data()
 if 'Close' in df.columns:
     df.rename(columns={'Close': 'Close_BTC-USD'}, inplace=True)
 
+# Check if data is valid
 if df.empty or 'Close_BTC-USD' not in df.columns:
     st.error("Unable to retrieve BTC price data.")
     st.stop()
@@ -65,7 +66,7 @@ if len(df) < 50:
     st.warning("Not enough historical data to train the model. Please wait for more data to accumulate.")
     st.stop()
 
-# Technical indicators
+# Technical Indicators
 try:
     close_series = df['Close_BTC-USD']
     df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -74,10 +75,10 @@ try:
     df['ROC'] = ROCIndicator(close=close_series).roc()
     df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
 except Exception as e:
-    st.error(f"Error calculating indicators: {e}")
+    st.error(f"Indicator Calculation Error: {e}")
     st.stop()
 
-# Prediction
+# Model target
 df['Target'] = close_series.shift(-3)
 df = df.dropna().reset_index(drop=True)
 
@@ -89,11 +90,12 @@ if len(df) < 50:
     st.warning("Still not enough processed data to build model.")
     st.stop()
 
+# Train model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# Buy/Sell
+# Buy/Sell signals
 df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
@@ -110,7 +112,7 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Chart controls
+# Time filter
 st.subheader("Indicator Trend Visualization")
 time_window = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
@@ -122,10 +124,11 @@ elif time_window == '6h':
 else:
     df_filtered = df.copy()
 
-# Chart
+# Indicators selection
 available_indicators = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", available_indicators, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
+# Chart display
 if selected:
     plot_df = df_filtered[['Datetime'] + selected]
     melted = plot_df.melt(id_vars='Datetime', var_name='Metric', value_name='Value')
@@ -144,17 +147,15 @@ if selected:
             x=buy_signals['Datetime'],
             y=buy_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='green', size=6, symbol='triangle-up', opacity=0.8),
-            name='Buy Signal',
-            showlegend=True
+            marker=dict(color='green', size=6, symbol='triangle-up'),
+            name='Buy Signal'
         ))
         fig.add_trace(go.Scatter(
             x=sell_signals['Datetime'],
             y=sell_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='red', size=6, symbol='triangle-down', opacity=0.8),
-            name='Sell Signal',
-            showlegend=True
+            marker=dict(color='red', size=6, symbol='triangle-down'),
+            name='Sell Signal'
         ))
 
     fig.update_layout(
@@ -167,4 +168,4 @@ if selected:
 
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.warning("Please select indicators to display the chart.")
+    st.warning("Please select at least one indicator to display.")
