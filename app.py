@@ -99,12 +99,16 @@ col3.metric("Time Predicted", predicted_time.strftime("%Y-%m-%d %H:%M:%S"))
 # Time filter
 st.subheader("Indicator Trend Visualization")
 time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
-if time_range == '1h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
-elif time_range == '6h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+if 'Datetime' in df.columns and pd.api.types.is_datetime64_any_dtype(df['Datetime']):
+    if time_range == '1h':
+        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
+    elif time_range == '6h':
+        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+    else:
+        df_filtered = df.copy()
 else:
-    df_filtered = df.copy()
+    st.error("Datetime column missing or incorrectly formatted.")
+    st.stop()
 
 # Chart
 options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
