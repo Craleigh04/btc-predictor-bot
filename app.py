@@ -22,8 +22,8 @@ CACHE_FILE = "btc_data_cache.csv"
 def load_btc_data():
     if os.path.exists(CACHE_FILE):
         df = pd.read_csv(CACHE_FILE)
-        df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
-        df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]
+        df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
+        df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
     else:
         df = yf.download("BTC-USD", period="7d", interval="1m")
         df = df.reset_index()
@@ -33,11 +33,11 @@ def load_btc_data():
     # Refresh latest 1 day
     recent = yf.download("BTC-USD", period="1d", interval="1m").reset_index()
     recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-    recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce')
+    recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
 
     # Combine and clean
     df = pd.concat([df, recent], ignore_index=True)
-    df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
+    df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
     df = df.dropna(subset=['Datetime'])
     df = df.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
     df.to_csv(CACHE_FILE, index=False)
