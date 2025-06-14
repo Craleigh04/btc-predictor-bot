@@ -25,7 +25,8 @@ def load_btc_data():
         df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
         df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
     else:
-        df = yf.download("BTC-USD", period="7d", interval="1m").reset_index()
+        df = yf.download("BTC-USD", period="7d", interval="1m")
+        df = df.reset_index()
         df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
         df.to_csv(CACHE_FILE, index=False)
 
@@ -34,7 +35,6 @@ def load_btc_data():
     recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
     recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
 
-    # Combine and clean
     df = pd.concat([df, recent], ignore_index=True)
     df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
     df = df.dropna(subset=['Datetime'])
@@ -66,17 +66,11 @@ except Exception as e:
     st.error(f"Error calculating indicators: {e}")
     st.stop()
 
-# Target and Features
+# Prediction setup
 df['Target'] = close_series.shift(-3)
+df = df.dropna().reset_index(drop=True)
+
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
-df = df.dropna(subset=features + ['Target']).reset_index(drop=True)
-
-# Abort if no data
-if df.empty:
-    st.error("Not enough clean data to make predictions. Try again soon.")
-    st.stop()
-
-# Model training
 X = df[features]
 y = df['Target']
 model = RandomForestRegressor(n_estimators=100, random_state=42)
@@ -88,21 +82,24 @@ df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', 
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
-# Live prediction
+# Live prediction display
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
+price_diff = future_price - actual_price
 
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
-col3.metric("Time Predicted", predicted_time.strftime("%Y-%m-%d %H:%M:%S"))
+col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Time filter
+# Time filter and signal toggle
 st.subheader("Indicator Trend Visualization")
 time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
+show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
+
 if 'Datetime' in df.columns and pd.api.types.is_datetime64_any_dtype(df['Datetime']):
     if time_range == '1h':
         df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
@@ -114,9 +111,9 @@ else:
     st.error("Datetime column missing or incorrectly formatted.")
     st.stop()
 
-# Chart display
-options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
-selected = st.multiselect("Select indicators to display:", options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
+# Chart
+display_options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
+selected = st.multiselect("Select indicators to display:", display_options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
 if selected:
     plot_df = df_filtered[['Datetime'] + selected]
@@ -131,20 +128,21 @@ if selected:
         title="BTC/USD Technical Indicators"
     )
 
-    fig.add_trace(go.Scatter(
-        x=buy_signals['Datetime'],
-        y=buy_signals['Close_BTC-USD'],
-        mode='markers',
-        marker=dict(color='green', size=8, symbol='triangle-up'),
-        name='Buy Signal'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sell_signals['Datetime'],
-        y=sell_signals['Close_BTC-USD'],
-        mode='markers',
-        marker=dict(color='red', size=8, symbol='triangle-down'),
-        name='Sell Signal'
-    ))
+    if show_signals:
+        fig.add_trace(go.Scatter(
+            x=buy_signals['Datetime'],
+            y=buy_signals['Close_BTC-USD'],
+            mode='markers',
+            marker=dict(color='green', size=8, symbol='triangle-up'),
+            name='Buy Signal'
+        ))
+        fig.add_trace(go.Scatter(
+            x=sell_signals['Datetime'],
+            y=sell_signals['Close_BTC-USD'],
+            mode='markers',
+            marker=dict(color='red', size=8, symbol='triangle-down'),
+            name='Sell Signal'
+        ))
 
     fig.update_layout(
         hovermode="x unified",
