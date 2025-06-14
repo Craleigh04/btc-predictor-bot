@@ -20,56 +20,56 @@ st.caption("Real-time BTC/USD forecast using technical indicators and Random For
 CACHE_FILE = "btc_data_cache.csv"
 
 def load_btc_data():
+    # Load cache
     if os.path.exists(CACHE_FILE):
         try:
             df = pd.read_csv(CACHE_FILE)
             if 'Datetime' not in df.columns:
-                raise ValueError("Cached file missing 'Datetime'")
+                raise ValueError("Cached data missing 'Datetime'")
             df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
             df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
         except Exception as e:
-            st.warning(f"Error loading cached data: {e}")
-            df = pd.DataFrame()
+            st.warning(f"Cache error: {e}")
+            df = pd.DataFrame(columns=['Datetime'])
     else:
-        df = pd.DataFrame()
+        df = pd.DataFrame(columns=['Datetime'])
 
+    # Fetch latest BTC data
     recent = yf.download("BTC-USD", period="1d", interval="1m")
-
     if not recent.empty:
-        recent.reset_index(inplace=True)
-
+        recent = recent.reset_index()
         if 'Datetime' not in recent.columns:
             if 'index' in recent.columns:
                 recent.rename(columns={'index': 'Datetime'}, inplace=True)
             elif 'Date' in recent.columns:
                 recent.rename(columns={'Date': 'Datetime'}, inplace=True)
 
-        if 'Datetime' in recent.columns:
-            recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
-        else:
-            st.error("Failed to find a datetime column in recent data")
-            return pd.DataFrame()
+        if 'Datetime' not in recent.columns:
+            st.error("ERROR: 'Datetime' column missing after fetch.")
+            return pd.DataFrame(columns=['Datetime'])
+
+        recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
     else:
         recent = pd.DataFrame(columns=['Datetime'])
 
+    # Combine and clean
     combined = pd.concat([df, recent], ignore_index=True)
-
     if 'Datetime' not in combined.columns:
-        st.error("Critical error: 'Datetime' column is missing from combined data.")
-        return pd.DataFrame()
+        st.error("ERROR: 'Datetime' column missing in final combined data.")
+        return pd.DataFrame(columns=['Datetime'])
 
     combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
-
-    if combined['Datetime'].isnull().all():
-        st.error("All Datetime values are null.")
-        return pd.DataFrame()
-
     combined = combined.dropna(subset=['Datetime'])
-    combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
+    if combined.empty:
+        st.error("ERROR: Combined data is empty after dropping null datetimes.")
+        return pd.DataFrame(columns=['Datetime'])
+
+    combined = combined.drop_duplicates(subset='Datetime', keep='last')
+    combined = combined.sort_values('Datetime').reset_index(drop=True)
     combined.to_csv(CACHE_FILE, index=False)
     return combined
 
-# Load and verify data
+# Load and validate
 df = load_btc_data()
 if 'Close' in df.columns:
     df.rename(columns={'Close': 'Close_BTC-USD'}, inplace=True)
@@ -79,23 +79,23 @@ if df.empty or 'Close_BTC-USD' not in df.columns:
     st.stop()
 
 if len(df) < 50:
-    st.warning("Not enough historical data to train the model. Please wait for more data to accumulate.")
+    st.warning("Not enough historical data to train the model.")
     st.stop()
 
-# Technical indicators
+# Indicators
 try:
-    close_series = df['Close_BTC-USD']
-    df['RSI'] = RSIIndicator(close=close_series).rsi()
-    df['EMA'] = EMAIndicator(close=close_series, window=14).ema_indicator()
-    df['MACD'] = MACD(close=close_series).macd()
-    df['ROC'] = ROCIndicator(close=close_series).roc()
-    df['BB_width'] = BollingerBands(close=close_series).bollinger_wband()
+    close = df['Close_BTC-USD']
+    df['RSI'] = RSIIndicator(close=close).rsi()
+    df['EMA'] = EMAIndicator(close=close, window=14).ema_indicator()
+    df['MACD'] = MACD(close=close).macd()
+    df['ROC'] = ROCIndicator(close=close).roc()
+    df['BB_width'] = BollingerBands(close=close).bollinger_wband()
 except Exception as e:
-    st.error(f"Error calculating indicators: {e}")
+    st.error(f"Indicator error: {e}")
     st.stop()
 
-# Prediction
-df['Target'] = close_series.shift(-3)
+# Target
+df['Target'] = close.shift(-3)
 df = df.dropna().reset_index(drop=True)
 
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
@@ -103,14 +103,14 @@ X = df[features]
 y = df['Target']
 
 if len(df) < 50:
-    st.warning("Still not enough processed data to build model.")
+    st.warning("Still not enough data to build model.")
     st.stop()
 
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
-# Buy/Sell
+# Signals
 df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
@@ -118,7 +118,7 @@ sell_signals = df[df['Signal'] == 'Sell']
 # Live forecast
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
-actual_price = close_series.iloc[-1]
+actual_price = df['Close_BTC-USD'].iloc[-1]
 predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
 
 st.subheader("Live BTC Price Forecast")
@@ -127,7 +127,7 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Chart controls
+# Controls
 st.subheader("Indicator Trend Visualization")
 time_window = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
