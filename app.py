@@ -33,10 +33,12 @@ def load_btc_data():
     # Refresh latest 1 day
     recent = yf.download("BTC-USD", period="1d", interval="1m").reset_index()
     recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-    recent['Datetime'] = pd.to_datetime(recent['Datetime'])
-    
+    recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce')
+
     # Combine and clean
     df = pd.concat([df, recent], ignore_index=True)
+    df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
+    df = df.dropna(subset=['Datetime'])
     df = df.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
     df.to_csv(CACHE_FILE, index=False)
     return df
@@ -52,8 +54,6 @@ if 'Close' in df.columns:
 if df.empty or 'Close_BTC-USD' not in df.columns:
     st.error("Unable to retrieve BTC price data.")
     st.stop()
-
-df['Datetime'] = pd.to_datetime(df['Datetime'])
 
 # Indicators
 try:
