@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
 from ta.momentum import RSIIndicator, ROCIndicator
 from ta.trend import EMAIndicator, MACD
@@ -69,6 +70,11 @@ model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
+# Detect buy/sell markers using RSI thresholds
+df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
+buy_signals = df[df['Signal'] == 'Buy']
+sell_signals = df[df['Signal'] == 'Sell']
+
 # Live forecast
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
@@ -81,16 +87,25 @@ st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
-col3.metric("Time Predicted", predicted_time.strftime("%Y-%m-%d %H:%M:%S"))
+col3.metric("Predicted for", predicted_time.strftime("%H:%M:%S"))
+
+# Time range toggle
+st.subheader("Indicator Trend Visualization")
+time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
+if time_range == '1h':
+    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
+elif time_range == '6h':
+    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+else:
+    df_filtered = df.copy()
 
 # Chart toggle
-st.subheader("Indicator Trend Visualization")
 options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", options, default=['Close_BTC-USD', 'EMA', 'Predicted'], key="chart_selector")
 
 # Plot chart with Plotly
 if selected:
-    plot_df = df[['Datetime'] + selected].copy()
+    plot_df = df_filtered[['Datetime'] + selected].copy()
     melted = plot_df.melt(id_vars='Datetime', var_name='Metric', value_name='Value')
 
     fig = px.line(
@@ -101,6 +116,22 @@ if selected:
         hover_data={"Datetime": True, "Value": ":.2f", "Metric": True},
         title="BTC/USD Technical Indicators"
     )
+
+    # Add Buy/Sell markers
+    fig.add_trace(go.Scatter(
+        x=buy_signals['Datetime'],
+        y=buy_signals['Close_BTC-USD'],
+        mode='markers',
+        marker=dict(color='green', size=8, symbol='triangle-up'),
+        name='Buy Signal'
+    ))
+    fig.add_trace(go.Scatter(
+        x=sell_signals['Datetime'],
+        y=sell_signals['Close_BTC-USD'],
+        mode='markers',
+        marker=dict(color='red', size=8, symbol='triangle-down'),
+        name='Sell Signal'
+    ))
 
     # Format timestamp in tooltip
     fig.update_traces(hovertemplate='%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f} %{fullData.name}')
