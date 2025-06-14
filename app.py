@@ -24,7 +24,7 @@ CACHE_FILE = "btc_data_cache.csv"
 
 if os.path.exists(CACHE_FILE):
     df = pd.read_csv(CACHE_FILE, parse_dates=['Datetime'])
-    df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
+    df = df[pd.to_datetime(df['Datetime']) > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
 else:
     df = yf.download("BTC-USD", period="7d", interval="1m")
     df = df.reset_index()
@@ -188,3 +188,4 @@ if selected:
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.warning("Please select at least one indicator to display the graph.")
+
