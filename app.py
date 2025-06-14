@@ -25,7 +25,7 @@ CACHE_FILE = "btc_data_cache.csv"
 if os.path.exists(CACHE_FILE):
     df = pd.read_csv(CACHE_FILE, parse_dates=['Datetime'])
     df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce')
-df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
+    df = df[df['Datetime'] > pd.Timestamp.now() - pd.Timedelta(days=7)]  # Trim to last 7 days
 else:
     df = yf.download("BTC-USD", period="7d", interval="1m")
     df = df.reset_index()
@@ -108,8 +108,8 @@ price_diff = future_price - actual_price
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
 col1.metric("Actual Price", f"${actual_price:,.2f}")
-col2.metric("Predicted Price", f"${future_price:,.2f}")
-col3.metric("For Time", predicted_time.strftime("%H:%M:%S"))
+col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
+col3.metric("Time Predicted", predicted_time.strftime("%Y-%m-%d %H:%M:%S"))
 
 # Time range toggle
 st.subheader("Indicator Trend Visualization")
@@ -189,5 +189,6 @@ if selected:
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.warning("Please select at least one indicator to display the graph.")
+
 
 
