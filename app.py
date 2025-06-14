@@ -37,6 +37,9 @@ def load_btc_data():
         if isinstance(recent.index, pd.DatetimeIndex):
             recent = recent.reset_index()
         recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+        if 'Datetime' not in recent.columns:
+            st.error("Live BTC data fetch failed: no Datetime column.")
+            return pd.DataFrame()
         recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
     else:
         recent = pd.DataFrame(columns=['Datetime'])
@@ -113,24 +116,25 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Time filter and signal toggle
+# Chart Display Options
 st.subheader("Indicator Trend Visualization")
 time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
 
+# Filter by selected time
 if 'Datetime' in df.columns and pd.api.types.is_datetime64_any_dtype(df['Datetime']):
+    now = df['Datetime'].max()
     if time_range == '1h':
-        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
+        df_filtered = df[df['Datetime'] > now - pd.Timedelta(hours=1)]
     elif time_range == '6h':
-        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+        df_filtered = df[df['Datetime'] > now - pd.Timedelta(hours=6)]
     else:
         df_filtered = df.copy()
 else:
     st.error("Datetime column missing or incorrectly formatted.")
     st.stop()
 
-# Chart
-st.markdown("""<style>.stMultiSelect{margin-bottom: 1rem;}</style>""", unsafe_allow_html=True)
+# Multiselect and Plot
 display_options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", display_options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
@@ -143,38 +147,36 @@ if selected:
         x='Datetime',
         y='Value',
         color='Metric',
-        hover_data={"Datetime": "|%Y-%m-%d %H:%M:%S", "Value": ":.2f"},
-        title="BTC/USD Technical Indicators"
+        line_shape='linear',
+        title="BTC/USD Technical Indicators",
     )
 
+    # Thicker lines
+    for trace in fig.data:
+        trace.line.width = 2
+
+    # Buy/Sell Signals
     if show_signals:
         fig.add_trace(go.Scatter(
             x=buy_signals['Datetime'],
             y=buy_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='green', size=6, symbol='triangle-up', opacity=0.7),
+            marker=dict(color='green', size=7, symbol='triangle-up', opacity=0.8),
             name='Buy Signal',
-            legendgroup='signals',
             showlegend=True
         ))
         fig.add_trace(go.Scatter(
             x=sell_signals['Datetime'],
             y=sell_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='red', size=6, symbol='triangle-down', opacity=0.7),
+            marker=dict(color='red', size=7, symbol='triangle-down', opacity=0.8),
             name='Sell Signal',
-            legendgroup='signals',
             showlegend=True
         ))
 
     fig.update_layout(
         hovermode="x unified",
-        xaxis=dict(
-            title="Datetime",
-            type="date",
-            tickformat="%H:%M",
-            rangeslider_visible=True
-        ),
+        xaxis=dict(title="Datetime", type="date", tickformat="%H:%M", rangeslider_visible=True),
         yaxis_title="Value",
         margin=dict(l=30, r=30, t=40, b=30),
         dragmode="pan"
