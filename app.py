@@ -19,29 +19,41 @@ st.caption("Real-time BTC/USD forecast using technical indicators and Random For
 
 CACHE_FILE = "btc_data_cache.csv"
 
-
 def load_btc_data():
+    # Try to load from cache
     if os.path.exists(CACHE_FILE):
         df = pd.read_csv(CACHE_FILE)
+        if 'Datetime' not in df.columns:
+            st.error("Cached file missing 'Datetime' column.")
+            return pd.DataFrame()
         df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
         df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
     else:
-        df = yf.download("BTC-USD", period="7d", interval="1m")
-        df = df.reset_index()
-        df.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-        df.to_csv(CACHE_FILE, index=False)
+        df = pd.DataFrame()
 
-    recent = yf.download("BTC-USD", period="1d", interval="1m").reset_index()
-    recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-    recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
+    # Fetch fresh recent data
+    recent = yf.download("BTC-USD", period="1d", interval="1m")
+    if not recent.empty:
+        if isinstance(recent.index, pd.DatetimeIndex):
+            recent = recent.reset_index()
+        recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+        recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
+    else:
+        recent = pd.DataFrame(columns=['Datetime'])
 
-    df = pd.concat([df, recent], ignore_index=True)
-    df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
-    df = df.dropna(subset=['Datetime'])
-    df = df.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
-    df.to_csv(CACHE_FILE, index=False)
-    return df
+    # Combine cached and recent data
+    combined = pd.concat([df, recent], ignore_index=True)
+    if 'Datetime' not in combined.columns:
+        st.error("Failed to retrieve 'Datetime' column from price data.")
+        return pd.DataFrame()
 
+    combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
+    combined = combined.dropna(subset=['Datetime'])
+    combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
+
+    # Save to cache
+    combined.to_csv(CACHE_FILE, index=False)
+    return combined
 
 # Load and verify data
 df = load_btc_data()
