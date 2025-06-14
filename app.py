@@ -19,49 +19,57 @@ st.caption("Real-time BTC/USD forecast using technical indicators and Random For
 
 CACHE_FILE = "btc_data_cache.csv"
 
-def fetch_and_combine_btc_data():
-    df_cache = pd.DataFrame()
+def load_btc_data():
+    # Remove broken cache if it exists
     if os.path.exists(CACHE_FILE):
-        try:
-            df_cache = pd.read_csv(CACHE_FILE)
-            if 'Datetime' in df_cache.columns:
-                df_cache['Datetime'] = pd.to_datetime(df_cache['Datetime'], errors='coerce', utc=True)
-        except Exception as e:
-            st.warning(f"Cache file exists but couldn't be read: {e}")
-
-    df_recent = yf.download("BTC-USD", period="1d", interval="1m")
-    if not df_recent.empty:
-        df_recent = df_recent.reset_index()
-        df_recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
-        df_recent['Datetime'] = pd.to_datetime(df_recent['Datetime'], errors='coerce', utc=True)
-        combined = pd.concat([df_cache, df_recent], ignore_index=True)
+        df = pd.read_csv(CACHE_FILE)
+        if 'Datetime' not in df.columns:
+            st.warning("Removing corrupted cache file: missing 'Datetime' column.")
+            os.remove(CACHE_FILE)
+            df = pd.DataFrame()
+        else:
+            df['Datetime'] = pd.to_datetime(df['Datetime'], errors='coerce', utc=True)
+            df = df[df['Datetime'] > pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)]
     else:
-        combined = df_cache
+        df = pd.DataFrame()
 
+    # Get recent live data
+    recent = yf.download("BTC-USD", period="1d", interval="1m", auto_adjust=False)
+    if not recent.empty:
+        recent = recent.reset_index()
+        if 'Datetime' not in recent.columns:
+            recent.rename(columns={'index': 'Datetime', 'Date': 'Datetime', 'datetime': 'Datetime'}, inplace=True)
+        recent['Datetime'] = pd.to_datetime(recent['Datetime'], errors='coerce', utc=True)
+    else:
+        recent = pd.DataFrame(columns=['Datetime'])
+
+    # Combine and clean
+    combined = pd.concat([df, recent], ignore_index=True)
     if 'Datetime' not in combined.columns:
-        st.error("Missing 'Datetime' in price data.")
+        st.error("Failed to retrieve datetime data.")
         return pd.DataFrame()
 
+    combined['Datetime'] = pd.to_datetime(combined['Datetime'], errors='coerce', utc=True)
     combined = combined.dropna(subset=['Datetime'])
-    combined = combined.drop_duplicates(subset='Datetime').sort_values('Datetime').reset_index(drop=True)
+    combined = combined.drop_duplicates(subset='Datetime', keep='last').sort_values('Datetime').reset_index(drop=True)
+
+    # Save clean cache
     combined.to_csv(CACHE_FILE, index=False)
     return combined
 
-df = fetch_and_combine_btc_data()
-if df.empty:
-    st.error("Unable to retrieve BTC price data.")
-    st.stop()
-
+# Load and verify data
+df = load_btc_data()
 if isinstance(df.columns, pd.MultiIndex):
     df.columns = ['_'.join(col).strip() for col in df.columns.values]
 
 if 'Close' in df.columns:
     df.rename(columns={'Close': 'Close_BTC-USD'}, inplace=True)
 
-if 'Close_BTC-USD' not in df.columns:
-    st.error("'Close_BTC-USD' column not found in data.")
+if df.empty or 'Close_BTC-USD' not in df.columns:
+    st.error("Unable to retrieve BTC price data.")
     st.stop()
 
+# Indicators
 try:
     close_series = df['Close_BTC-USD']
     df['RSI'] = RSIIndicator(close=close_series).rsi()
@@ -73,9 +81,13 @@ except Exception as e:
     st.error(f"Error calculating indicators: {e}")
     st.stop()
 
-# Target column
+# Prediction setup
 df['Target'] = close_series.shift(-3)
 df = df.dropna().reset_index(drop=True)
+
+if len(df) < 50:
+    st.error("Not enough clean data available to train the model. Try again in a few minutes.")
+    st.stop()
 
 features = ['Close_BTC-USD', 'RSI', 'EMA', 'MACD', 'ROC', 'BB_width']
 X = df[features]
@@ -90,16 +102,16 @@ model.fit(X, y)
 df['Predicted'] = model.predict(X)
 
 # Buy/Sell Signals
-signal_condition = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
-df['Signal'] = signal_condition
+df['Signal'] = np.where(df['RSI'] < 30, 'Buy', np.where(df['RSI'] > 70, 'Sell', ''))
 buy_signals = df[df['Signal'] == 'Buy']
 sell_signals = df[df['Signal'] == 'Sell']
 
-# Latest Prediction
+# Live prediction display
 latest_input = df.iloc[-1][features].values.reshape(1, -1)
 future_price = model.predict(latest_input)[0]
 actual_price = close_series.iloc[-1]
 predicted_time = df.iloc[-1]['Datetime'] + pd.Timedelta(minutes=3)
+price_diff = future_price - actual_price
 
 st.subheader("Live BTC Price Forecast")
 col1, col2, col3 = st.columns(3)
@@ -107,18 +119,24 @@ col1.metric("Actual Price", f"${actual_price:,.2f}")
 col2.metric("Predicted (3 min)", f"${future_price:,.2f}")
 col3.metric("Time Predicted", predicted_time.strftime("%H:%M:%S"))
 
-# Controls
+# Time filter and signal toggle
 st.subheader("Indicator Trend Visualization")
 time_range = st.radio("Select time window:", ['1h', '6h', '24h'], horizontal=True)
 show_signals = st.checkbox("Show Buy/Sell Signals", value=True)
 
-if time_range == '1h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
-elif time_range == '6h':
-    df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+if 'Datetime' in df.columns and pd.api.types.is_datetime64_any_dtype(df['Datetime']):
+    if time_range == '1h':
+        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=1)]
+    elif time_range == '6h':
+        df_filtered = df[df['Datetime'] > df['Datetime'].max() - pd.Timedelta(hours=6)]
+    else:
+        df_filtered = df.copy()
 else:
-    df_filtered = df.copy()
+    st.error("Datetime column missing or incorrectly formatted.")
+    st.stop()
 
+# Chart
+st.markdown("""<style>.stMultiSelect{margin-bottom: 1rem;}</style>""", unsafe_allow_html=True)
 display_options = ['Close_BTC-USD', 'EMA', 'RSI', 'MACD', 'ROC', 'BB_width', 'Predicted']
 selected = st.multiselect("Select indicators to display:", display_options, default=['Close_BTC-USD', 'EMA', 'Predicted'])
 
@@ -140,20 +158,29 @@ if selected:
             x=buy_signals['Datetime'],
             y=buy_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='green', size=6, symbol='triangle-up'),
-            name='Buy Signal'
+            marker=dict(color='green', size=6, symbol='triangle-up', opacity=0.7),
+            name='Buy Signal',
+            legendgroup='signals',
+            showlegend=True
         ))
         fig.add_trace(go.Scatter(
             x=sell_signals['Datetime'],
             y=sell_signals['Close_BTC-USD'],
             mode='markers',
-            marker=dict(color='red', size=6, symbol='triangle-down'),
-            name='Sell Signal'
+            marker=dict(color='red', size=6, symbol='triangle-down', opacity=0.7),
+            name='Sell Signal',
+            legendgroup='signals',
+            showlegend=True
         ))
 
     fig.update_layout(
         hovermode="x unified",
-        xaxis=dict(title="Datetime", type="date", rangeslider_visible=True),
+        xaxis=dict(
+            title="Datetime",
+            type="date",
+            tickformat="%H:%M",
+            rangeslider_visible=True
+        ),
         yaxis_title="Value",
         margin=dict(l=30, r=30, t=40, b=30),
         dragmode="pan"
@@ -161,4 +188,4 @@ if selected:
 
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.warning("Please select at least one indicator to display.")
+    st.warning("Please select at least one indicator to display the chart.")
